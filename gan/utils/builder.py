@@ -25,6 +25,8 @@ class Builders:
         self.builders_tokens = [[] for i in range(batch_size)] 
         self.exprs = [None] * batch_size
         self.exprs_str = [None] * batch_size
+        self.exprs_af_str = [None] * batch_size
+        self.exprs_gp_str = [None] * batch_size
         self.max_len = max_len
         self.n_actions = n_actions 
         self.examined = False
@@ -40,6 +42,8 @@ class Builders:
         new.builders_tokens = [new.builders_tokens[i] for i in indices]
         new.exprs = [new.exprs[i] for i in indices]
         new.exprs_str = [new.exprs_str[i] for i in indices]
+        new.exprs_af_str = [new.exprs_af_str[i] for i in indices]
+        new.exprs_gp_str = [new.exprs_gp_str[i] for i in indices]
 
         if self.examined:
             new.scores = [new.scores[i] for i in indices]
@@ -57,6 +61,8 @@ class Builders:
         new.builders_tokens = self.builders_tokens + other.builders_tokens
         new.exprs = self.exprs + other.exprs
         new.exprs_str = self.exprs_str + other.exprs_str
+        new.exprs_af_str = self.exprs_af_str + other.exprs_af_str
+        new.exprs_gp_str = self.exprs_gp_str + other.exprs_gp_str
         if self.examined and other.examined:
             new.scores = self.scores + other.scores
             new.multi_scores = self.multi_scores + other.multi_scores
@@ -103,6 +109,8 @@ class Builders:
         self.builders_tokens = [self.builders_tokens[i] for i in valid_idx]
         self.exprs = [self.exprs[i] for i in valid_idx]
         self.exprs_str = [self.exprs_str[i] for i in valid_idx]
+        self.exprs_af_str = [self.exprs_af_str[i] for i in valid_idx]
+        self.exprs_gp_str = [self.exprs_gp_str[i] for i in valid_idx]
         if self.examined:
             self.scores = [self.scores[i] for i in valid_idx]
             self.multi_scores = [self.multi_scores[i] for i in valid_idx]
@@ -121,6 +129,8 @@ class Builders:
         self.builders_tokens = [self.builders_tokens[i] for i in valid_idx]
         self.exprs = [self.exprs[i] for i in valid_idx]
         self.exprs_str = [self.exprs_str[i] for i in valid_idx]
+        self.exprs_af_str = [self.exprs_af_str[i] for i in valid_idx]
+        self.exprs_gp_str = [self.exprs_gp_str[i] for i in valid_idx]
         if self.examined:
             self.scores = [self.scores[i] for i in valid_idx]
             self.multi_scores = [self.multi_scores[i] for i in valid_idx]
@@ -215,10 +225,29 @@ class Builders:
             self.builders[i].get_tree()
             if self.builders[i].is_valid() else None
             for i in range(self.batch_size)
-              ]
-        self.exprs = res
-        self.exprs_str = [str(i) for i in res]
+        ]
+        self._assign_expr_strings(res)
         return res
+
+    def _assign_expr_strings(self, res: list) -> None:
+        from alphagen.config import EXPR_OUTPUT_FORMAT
+        from tools.expr_translate import format_expr_output, to_gp_dsl
+
+        self.exprs = res
+        self.exprs_af_str = []
+        self.exprs_gp_str = []
+        self.exprs_str = []
+        for node in res:
+            if node is None:
+                self.exprs_af_str.append(None)
+                self.exprs_gp_str.append(None)
+                self.exprs_str.append(None)
+                continue
+            af = str(node)
+            self.exprs_af_str.append(af)
+            gp = to_gp_dsl(af)
+            self.exprs_gp_str.append(gp)
+            self.exprs_str.append(format_expr_output(af, EXPR_OUTPUT_FORMAT))
     
     def _valid_action_types(self,builder) -> dict:
         self._builder = builder
@@ -299,6 +328,8 @@ def save_blds_csv(blds:Builders,path):
     df = pd.DataFrame()
     df['exprs'] = blds.exprs_str
     df['scores'] = blds.scores
+    df['exprs_af'] = blds.exprs_af_str
+    df['gp_dsl'] = blds.exprs_gp_str
     df = df.sort_values('scores',ascending=False)
     df.to_csv(path)
 
@@ -310,6 +341,8 @@ def save_blds(blds:Builders,path,epoch):
     df = pd.DataFrame()
     df['exprs'] = blds.exprs_str
     df['scores'] = blds.scores
+    df['exprs_af'] = blds.exprs_af_str
+    df['gp_dsl'] = blds.exprs_gp_str
     df = df.sort_values('scores',ascending=False)
     # df.to_pickle(f"{path}/bld_{epoch}.pkl")    
     save_pickle(blds,f"{path}/z_bld_{epoch}.pkl")
@@ -318,7 +351,13 @@ def save_blds(blds:Builders,path,epoch):
 from tqdm import tqdm
 
 def get_blds_df(blds,top=None):
-    df=pd.DataFrame({'score':blds.scores,'exprs':blds.exprs,'exprs_str':blds.exprs_str})
+    df=pd.DataFrame({
+        'score': blds.scores,
+        'exprs': blds.exprs,
+        'exprs_str': blds.exprs_str,
+        'exprs_af': blds.exprs_af_str,
+        'gp_dsl': blds.exprs_gp_str,
+    })
     df =df[df['score']>0]
     df = df.sort_values('score',ascending=False)
     if top is not None and top != 0:

@@ -43,3 +43,9 @@ DELTA_TIMES = [1,5,10, 20, 30, 40, 50]
 CONSTANTS = [-30., -10., -5., -2., -1., -0.5, -0.01, 0.01, 0.5, 1., 2., 5., 10., 30.]
 
 REWARD_PER_STEP = 0.
+
+# 因子公式对外字符串格式（build_exprs / CSV 的 exprs 列）:
+#   'dai'         -> BigQuant DAI SQL（默认）
+#   'gp'          -> Factor Mining GP DSL
+#   'alphaforge'  -> AlphaForge 原始格式
+EXPR_OUTPUT_FORMAT = 'dai'

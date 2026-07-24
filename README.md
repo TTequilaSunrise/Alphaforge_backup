@@ -1,67 +1,83 @@
-# AlphaForge(AFF)
+# AlphaForge(AFF) — BigAlpha 2026 / BigQuant DAI
 
 
-### Data Preparation
-Similar to [AlphaGen](https://github.com/RL-MLDM/alphagen), We Use [Qlib](https://github.com/microsoft/qlib#data-preparation) as data save tool and download data from free & open-source data source  [baostock](http://baostock.com/baostock/index.php/%E9%A6%96%E9%A1%B5).
+### Data contract (training set)
 
-Please install Qlib [Qlib](https://github.com/microsoft/qlib) first
+| Item | Spec |
+|------|------|
+| Universe | CSI1000 historical constituents (`bigalpha_2026_instruments`) |
+| Range | 2019-01-01 ~ 2024-12-31 |
+| Bars | 1-minute K + 10-level LOB (`bigalpha_2026_stock_bar1m`) |
+| Financial | PIT (`bigalpha_2026_financial`, `category='lf' AND shift=0`) |
 
-Then download stock data through running `data_collection/fetch_baostock_data.py`
+Official read example:
 
-The next, Modify the correspoding `/path/for/qlib_data` in `gan.utils.data.py` to the data you downloaded (the dafault setting is `~/.qlib/qlib_data/cn_data_rolling`)
+```python
+import dai  # on platform; locally: bigquant.init_from_config(); from bigquant import dai
 
-
-### Run Our Model
-
-#### stage1: Minning alpha factors
-```shell
-python train_AFF.py --instruments=csi300 --train_end_year=2020 --seeds=[0,1,2,3,4] --save_name=test --zoo_size=100
+dai.query(
+    "SELECT * FROM bigalpha_2026_stock_bar1m",
+    filters={"date": ["2019-01-01 00:00:00", "2019-01-05 23:59:59"]},
+).df().head()
 ```
 
-Here,
-- `instruments` is the dataset to use, e.g., `csi300`,`csi500`.
-- `seeds` is random seed list, e.g., `[0,1,2]` or `[0]`. 
-- `train_end_year` is the last year of training set, when train_end_year is 2020,the train,valid and test set is seperately: `2010-01-01 to 2020-12-31`,`2021-01-01 to 2021-12-31`,`2022-01-01 to 2022-12-31`
-- `save_name` is the prefix when saving running results. `zoo_size` is the num of factors to save at stage 1 mining model.
 
-#### stage2: Combining alpha factors
-```shell
-python combine_AFF.py --instruments=csi300 --train_end_year=2020 --seeds=[0,1,2,3,4] --save_name=test --n_factors=10 --window=inf
-```
-Here `instruments,train_end_year,seeds,save_name`,` must be the same as it in stage 1
-- `n_factors` is the num of factors used at each day, it should be less than or equal to `zoo_size` in stage 1.
-- `window` is the slicing window that is used to evaluate the alpha factors in order to dynamicly select and cobine.
+### Code layout
 
-#### stage3: Show the results
+| Module | Role |
+|--------|------|
+| [`alphagen_qlib/bigalpha2026.py`](alphagen_qlib/bigalpha2026.py) | Competition tables: instruments / bar1m / financial PIT / 1m→daily agg |
+| [`alphagen_qlib/bigquant_backend.py`](alphagen_qlib/bigquant_backend.py) | Auth + generic `dai.query`; optional `cn_stock_bar1d` path |
+| [`alphagen_qlib/stock_data.py`](alphagen_qlib/stock_data.py) | `StockData(..., backend="bigalpha2026")` day tensor for AFF |
+| [`gan/utils/data.py`](gan/utils/data.py) | `get_data_by_year` defaults to csi1000 + bigalpha2026 |
 
-You could run the ipython notebook file 
 
-```shell
-exp_AFF_calc_result.ipynb
+### Env
+
+```bash
+conda activate bigquant
+bq auth configure
+# tables need ACL: bigalpha_2026_stock_bar1m / financial / instruments
 ```
 
-to generate and concat experiment result.
+Raw minute+LOB (debug):
+
+```python
+from alphagen_qlib.bigalpha2026 import fetch_bar1m, fetch_financial_pit, fetch_csi1000_instruments
+
+pool = fetch_csi1000_instruments("2019-01-01", "2019-01-05")
+bars = fetch_bar1m("2019-01-01 00:00:00", "2019-01-05 23:59:59")
+fin = fetch_financial_pit("2018-01-01", "2019-01-05")
+```
+
+Day-freq StockData for AFF (aggregates 1m→1d):
+
+```python
+from alphagen_qlib.stock_data import StockData
+import torch
+d = StockData(
+    "csi1000", "2019-01-01", "2019-03-31",
+    raw=True, device=torch.device("cpu"),
+    backend="bigalpha2026",
+    max_backtrack_days=5, max_future_days=2,
+)
+print(d.data.shape)
+```
+
+Fallback to official daily table: `backend="cn_bar1d"`.
 
 
-### Run baseline experiments
+### Run AFF
 
-The experiment process of other models is similar to running our AFF model, Except that none of the other models have a combine step.
+```shell
+python train_AFF.py --instruments=csi1000 --train_end_year=2023 --seeds=[0] --save_name=test --zoo_size=100
+```
 
-#### GP:
-
-train: `train_RL.py`, show result: `exp_RL_calc_result.ipynb`
-
-#### RL:
-
-train: `train_RL.py`, show result: `exp_RL_calc_result.ipynb`
-
-#### DSO:
-
-train: `train_RL.py`, show result: `exp_RL_calc_result.ipynb`
-
-#### ML models including XGBoost, LightGBM and MLP:
-
-train & show results: `exp_ML_train_and_result.ipynb`
+(Adjust years to fit 2019–2024; first run caches under `pkl/bq_bigalpha2026_*`.)
 
 
+### Notes
 
+- Schema has ``price`` (last) not ``close``; loader maps ``close = price`` when needed.
+- ``volume`` / ``amount`` are documented as *当日累计*; daily aggregation uses ``MAX``, not ``SUM``.
+- Platform may inject physical table names via ``datasources={...}``; pass through to `StockData` / `fetch_*`.
